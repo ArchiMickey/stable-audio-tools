@@ -186,6 +186,9 @@ class SampleDataset(torch.utils.data.Dataset):
             audio = self.load_file(audio_filename)
 
             audio, t_start, t_end, seconds_start, seconds_total, padding_mask = self.pad_crop(audio)
+            
+            if torch.all(audio == 0):
+                return self[random.randrange(len(self))]
 
             # Run augmentations on this sample (including random crop)
             if self.augs is not None:

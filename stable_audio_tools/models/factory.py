@@ -89,6 +89,9 @@ def create_bottleneck_from_config(bottleneck_config):
     if bottleneck_type == 'tanh':
         from .bottleneck import TanhBottleneck
         bottleneck = TanhBottleneck()
+    elif bottleneck_type == 'ae':
+        from .bottleneck import AEBottleNeck
+        bottleneck = AEBottleNeck()
     elif bottleneck_type == 'vae':
         from .bottleneck import VAEBottleneck
         bottleneck = VAEBottleneck()

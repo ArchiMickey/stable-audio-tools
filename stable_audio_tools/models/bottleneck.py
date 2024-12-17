@@ -29,7 +29,22 @@ class DiscreteBottleneck(Bottleneck):
 
     def decode_tokens(self, codes, **kwargs):
         raise NotImplementedError
-    
+
+class AEBottleNeck(Bottleneck):
+    def __init__(self):
+        super().__init__(is_discrete=False)
+
+    def encode(self, x, return_info=False):
+        info = {}
+
+        if return_info:
+            return x, info
+        else:
+            return x
+
+    def decode(self, x):
+        return x
+
 class TanhBottleneck(Bottleneck):
     def __init__(self):
         super().__init__(is_discrete=False)
