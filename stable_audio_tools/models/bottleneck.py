@@ -63,6 +63,21 @@ class TanhBottleneck(Bottleneck):
     def decode(self, x):
         return x
 
+class AEBottleneck(Bottleneck):
+    def __init__(self):
+        super().__init__(is_discrete=False)
+
+    def encode(self, x, return_info=False):
+        info = {}
+
+        if return_info:
+            return x, info
+        else:
+            return x
+
+    def decode(self, x):
+        return x
+
 def vae_sample(mean, scale):
         stdev = nn.functional.softplus(scale) + 1e-4
         var = stdev * stdev

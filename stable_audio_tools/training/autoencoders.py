@@ -21,6 +21,7 @@ class AutoencoderTrainingWrapper(pl.LightningModule):
             self, 
             autoencoder: AudioAutoencoder,
             lr: float = 1e-4,
+            gradient_clip_val: float =0.0,
             warmup_steps: int = 0,
             encoder_freeze_on_warmup: bool = False,
             sample_rate=48000,
@@ -42,6 +43,7 @@ class AutoencoderTrainingWrapper(pl.LightningModule):
         self.warmup_steps = warmup_steps
         self.encoder_freeze_on_warmup = encoder_freeze_on_warmup
         self.lr = lr
+        self.gradient_clip_val = gradient_clip_val
 
         self.force_input_mono = force_input_mono
 
@@ -331,6 +333,7 @@ class AutoencoderTrainingWrapper(pl.LightningModule):
 
             opt_gen.zero_grad()
             self.manual_backward(loss)
+            self.clip_gradients(opt_gen, self.gradient_clip_val, "norm")
             opt_gen.step()
 
             if sched_gen is not None:

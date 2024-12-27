@@ -4,6 +4,7 @@ import os
 import torch
 import pytorch_lightning as pl
 import random
+from omegaconf import OmegaConf
 
 from stable_audio_tools.data.dataset import create_dataloader_from_config
 from stable_audio_tools.models import create_model_from_config
@@ -22,6 +23,15 @@ class ModelConfigEmbedderCallback(pl.Callback):
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         checkpoint["model_config"] = self.model_config
 
+def load_config(config_path):
+    if config_path.endswith(".yaml"):
+        return OmegaConf.load(config_path)
+    elif config_path.endswith(".json"):
+        with open(config_path) as f:
+            return json.load(f)
+    else:
+        raise ValueError(f"Unknown config type: {config_path}")
+
 def main():
 
     args = get_all_args()
@@ -36,11 +46,9 @@ def main():
     torch.manual_seed(seed)
 
     #Get JSON config from args.model_config
-    with open(args.model_config) as f:
-        model_config = json.load(f)
+    model_config = load_config(args.model_config)
 
-    with open(args.dataset_config) as f:
-        dataset_config = json.load(f)
+    dataset_config = load_config(args.dataset_config)
 
     train_dl = create_dataloader_from_config(
         dataset_config, 
@@ -70,6 +78,8 @@ def main():
 
     wandb_logger = pl.loggers.WandbLogger(project=args.name)
     wandb_logger.watch(training_wrapper)
+
+    tensorboard_logger = pl.loggers.TensorBoardLogger("tb_logs", name=args.name)
 
     exc_callback = ExceptionCallback()
     
@@ -104,7 +114,7 @@ def main():
         else:
             strategy = args.strategy
     else:
-        strategy = 'ddp_find_unused_parameters_true' if args.num_gpus > 1 else "auto" 
+        strategy = "ddp_find_unused_parameters_true" if args.num_gpus > 1 else "auto" 
 
     trainer = pl.Trainer(
         devices=args.num_gpus,
@@ -114,11 +124,11 @@ def main():
         precision=args.precision,
         accumulate_grad_batches=args.accum_batches, 
         callbacks=[ckpt_callback, demo_callback, exc_callback, save_model_config_callback],
-        logger=wandb_logger,
+        logger=[wandb_logger, tensorboard_logger],
         log_every_n_steps=1,
         max_epochs=10000000,
         default_root_dir=args.save_dir,
-        gradient_clip_val=args.gradient_clip_val,
+        gradient_clip_val=args.gradient_clip_val if model_config["model_type"] != "autoencoder" else None,
         reload_dataloaders_every_n_epochs = 0
     )
 

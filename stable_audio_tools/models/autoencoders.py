@@ -8,6 +8,8 @@ from torchaudio import transforms as T
 from alias_free_torch import Activation1d
 from dac.nn.layers import WNConv1d, WNConvTranspose1d
 from typing import Literal, Dict, Any
+from einops import rearrange
+from einops.layers.torch import Reduce, Rearrange
 
 from ..inference.sampling import sample
 from ..inference.utils import prepare_audio
@@ -56,13 +58,37 @@ class ResidualUnit(nn.Module):
     def forward(self, x):
         res = x
         
-        #x = checkpoint(self.layers, x)
-        x = self.layers(x)
+        x = checkpoint(self.layers, x)
+        # x = self.layers(x)
 
         return x + res
 
+class ResidualBlock(nn.Module):
+    def __init__(
+        self,
+        main,
+        shortcut
+    ):
+        super(ResidualBlock, self).__init__()
+
+        self.main = main
+        self.shortcut = shortcut
+
+    def forward_main(self, x: torch.Tensor) -> torch.Tensor:
+        return self.main(x)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.main is None:
+            res = x
+        elif self.shortcut is None:
+            res = self.forward_main(x)
+        else:
+            res = self.forward_main(x) + self.shortcut(x)
+        return res
+    
+
 class EncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, use_snake=False, antialias_activation=False):
+    def __init__(self, in_channels, out_channels, stride, use_snake=False, antialias_activation=False, downsample_shortcut="none"):
         super().__init__()
 
         self.layers = nn.Sequential(
@@ -77,11 +103,23 @@ class EncoderBlock(nn.Module):
                       kernel_size=2*stride, stride=stride, padding=math.ceil(stride/2)),
         )
 
+        if downsample_shortcut == "none":
+            self.res_scale = None
+            self.res = None
+        elif downsample_shortcut == "conv":
+            self.res_scale = nn.Parameter(torch.ones(1))
+            self.res = WNConv1d(in_channels=in_channels, out_channels=out_channels,
+                        kernel_size=2*stride, stride=stride, padding=math.ceil(stride/2))
+        else:
+            raise NotImplementedError(f"Unknown downsample_shortcut {downsample_shortcut}")
+
     def forward(self, x):
+        if self.res is not None:
+            return self.layers(x) * self.res_scale + self.res(x) * (1 - self.res_scale)
         return self.layers(x)
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, use_snake=False, antialias_activation=False, use_nearest_upsample=False):
+    def __init__(self, in_channels, out_channels, stride, use_snake=False, antialias_activation=False, use_nearest_upsample=False, upsample_shortcut="none"):
         super().__init__()
 
         if use_nearest_upsample:
@@ -110,7 +148,20 @@ class DecoderBlock(nn.Module):
                          dilation=9, use_snake=use_snake),
         )
 
+        if upsample_shortcut == "none":
+            self.res_scale = None
+            self.res = None
+        elif upsample_shortcut == "conv":
+            self.res_scale = nn.Parameter(torch.ones(1))
+            self.res = WNConvTranspose1d(in_channels=in_channels,
+                        out_channels=out_channels,
+                        kernel_size=2*stride, stride=stride, padding=math.ceil(stride/2))
+        else:
+            raise NotImplementedError(f"Unknown upsample_shortcut {upsample_shortcut}")
+
     def forward(self, x):
+        if self.res is not None:
+            return self.layers(x) * self.res_scale + self.res(x) * (1 - self.res_scale)
         return self.layers(x)
 
 class OobleckEncoder(nn.Module):
@@ -121,7 +172,8 @@ class OobleckEncoder(nn.Module):
                  c_mults = [1, 2, 4, 8], 
                  strides = [2, 4, 8, 8],
                  use_snake=False,
-                 antialias_activation=False
+                 antialias_activation=False,
+                 downsample_shortcut="none"
         ):
         super().__init__()
           
@@ -134,7 +186,7 @@ class OobleckEncoder(nn.Module):
         ]
         
         for i in range(self.depth-1):
-            layers += [EncoderBlock(in_channels=c_mults[i]*channels, out_channels=c_mults[i+1]*channels, stride=strides[i], use_snake=use_snake)]
+            layers += [EncoderBlock(in_channels=c_mults[i]*channels, out_channels=c_mults[i+1]*channels, stride=strides[i], use_snake=use_snake, downsample_shortcut=downsample_shortcut)]
 
         layers += [
             get_activation("snake" if use_snake else "elu", antialias=antialias_activation, channels=c_mults[-1] * channels),
@@ -157,7 +209,8 @@ class OobleckDecoder(nn.Module):
                  use_snake=False,
                  antialias_activation=False,
                  use_nearest_upsample=False,
-                 final_tanh=True):
+                 final_tanh=True,
+                 upsample_shortcut="none"):
         super().__init__()
 
         c_mults = [1] + c_mults
@@ -175,7 +228,8 @@ class OobleckDecoder(nn.Module):
                 stride=strides[i-1], 
                 use_snake=use_snake, 
                 antialias_activation=antialias_activation,
-                use_nearest_upsample=use_nearest_upsample
+                use_nearest_upsample=use_nearest_upsample,
+                upsample_shortcut=upsample_shortcut
                 )
             ]
 

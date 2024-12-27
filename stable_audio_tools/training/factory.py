@@ -42,6 +42,7 @@ def create_training_wrapper_from_config(model_config, model):
         return AutoencoderTrainingWrapper(
             model, 
             lr=training_config["learning_rate"],
+            gradient_clip_val=training_config.get("gradient_clip_val", 0.0),
             warmup_steps=training_config.get("warmup_steps", 0), 
             encoder_freeze_on_warmup=training_config.get("encoder_freeze_on_warmup", False),
             sample_rate=model_config["sample_rate"],
